@@ -78,9 +78,14 @@ class ElevatorSimulation{
 		
 		while (currTick < duration) {
 			currTick++;
+			System.out.println("Tick is at: " + currTick);
 			
 			for (int i = 0; i < floors; i++) {
 				totFloors.get(i).generatePassenger(passengers, floors);
+			}
+			
+			for (int i = 0; i < elevators; i++) {
+				totFloors.get(i).load(totElevators, totFloors, elevatorCapacity);
 			}
 		}
 		
@@ -176,8 +181,8 @@ class ElevatorSimulation{
 
 class Floor{
 	
-	static Queue<Passenger> upCrowd;
-	static Queue<Passenger> downCrowd;
+	Queue<Passenger> upCrowd;
+	Queue<Passenger> downCrowd;
 	static Random passengerGen = new Random();
 	static Random desiredFloor = new Random();
 	protected int floorNumber;
@@ -195,35 +200,37 @@ class Floor{
 	void generatePassenger(double prob, int maxFloors) {
 		
 		if (passengerGen.nextDouble(100)+ 1 <= prob*100) {
-			load(maxFloors);
+			int destination = desiredFloor.nextInt(maxFloors + 1);
+			
+			if (floorNumber == maxFloors) {
+				destination = desiredFloor.nextInt(1, maxFloors);
+			} else if (floorNumber == 1) {
+				destination = desiredFloor.nextInt(2, maxFloors + 1);
+			} else if (floorNumber == destination) {
+				int toAdd = desiredFloor.nextInt(3) - 1;
+				while (toAdd == 0) {
+					toAdd = desiredFloor.nextInt(3) - 1;
+				}
+				destination += toAdd;
+			}
+			
+			
+			if (destination < this.floorNumber) {
+				downCrowd.add(new Passenger(this.floorNumber, destination));
+			} else if (destination > this.floorNumber) {
+				upCrowd.add(new Passenger(this.floorNumber, destination));
+			} else {
+				System.err.println("OWO DADDY");
+			}
 		}
 		
 	}
 	
-	private void load(int maxFloors){
-		
-		int destination = desiredFloor.nextInt(maxFloors + 1);
-		
-		if (floorNumber == maxFloors) {
-			destination = desiredFloor.nextInt(1, maxFloors);
-		} else if (floorNumber == 1) {
-			destination = desiredFloor.nextInt(2, maxFloors + 1);
-		} else if (floorNumber == destination) {
-			int toAdd = desiredFloor.nextInt(3) - 1;
-			while (toAdd == 0) {
-				toAdd = desiredFloor.nextInt(3) - 1;
-			}
-			destination += toAdd;
+	void load(List<Elevator> allEl, List<Floor> allFl, int capacity){
+		for (int i = 0; i < allEl.size(); i++) {
+			allEl.get(i).travel(allFl, capacity);
 		}
-		
-		
-		if (destination < this.floorNumber) {
-			downCrowd.add(new Passenger(this.floorNumber, destination));
-		} else if (destination > this.floorNumber) {
-			upCrowd.add(new Passenger(this.floorNumber, destination));
-		} else {
-			System.err.println("OWO DADDY");
-		}
+
 		
 	}
 	
@@ -236,11 +243,17 @@ class Passenger{
 	protected int endFloor;
 	protected long startTime;
 	protected long endTime;
+	protected boolean desireUp;
 	
 	public Passenger(int start, int end) {
 		this.startTime = System.currentTimeMillis();
 		this.startFloor = start;
 		this.endFloor = end;
+		if (this.endFloor > this.startFloor) {
+			desireUp = true;
+		} else {
+			desireUp = false;
+		}
 	}
 	
 	public int getStart() {
@@ -250,30 +263,139 @@ class Passenger{
 	public int getEnd() {
 		return(endFloor);
 	}
+	
+	public void outTime() {
+		this.endTime = System.currentTimeMillis();
+		System.out.println("[I waited for: " + (endTime - startTime) + " milliseconds to get to my floor!]");
+	}
 }
 
 class Elevator{
 	
 	int elevatorNumber;
-	Heap<Integer> stopUp = new Heap<>();
-	Heap<Integer> stopDown = new Heap<>();
-	List<Integer> Passenger = new ArrayList<>();
-	int currFloor = 0;
-	boolean up;
+	PriorityQueue<Integer> stopUp = new PriorityQueue<>(); //minHeap
+	PriorityQueue<Integer> stopDown = new PriorityQueue<>(); //maxHeap
+	List<Passenger> passengersIn = new ArrayList<>();
+	int currFloor = 1;
+	boolean up = true;
 	
 	public Elevator(int num) {
 		this.elevatorNumber = num;
 	}
 	
-	private static void loadUnload() {
-		
+	
+	private void loadUnload(List<Floor> allFl, int capacity) {
+		if (up == true) {
+			if ((stopUp.peek() != null) && (stopUp.peek() == currFloor)) {
+				for (Passenger p : passengersIn) {
+					if (p.endFloor == currFloor) {
+						p.outTime();
+						passengersIn.remove(p);
+					}
+				}
+				while (stopUp.contains(allFl.get(currFloor - 1).upCrowd.element().endFloor)) {
+					stopUp.remove();
+				}
+			}
+
+		} else {
+			if ((stopDown.peek() != null) && (stopDown.peek() + (stopDown.peek() * 2)  == currFloor)) {
+				for (Passenger p : passengersIn) {
+					if (p.endFloor == currFloor) {
+						p.outTime();
+						passengersIn.remove(p);
+					}
+				}
+				while (stopDown.contains((allFl.get(currFloor - 1).upCrowd.element().endFloor) - (((allFl.get(currFloor - 1).upCrowd.element().endFloor) * 2)))) {
+					stopDown.remove();
+				}
+			}
+		}
+		requestStop(allFl, capacity);
 	}
 	
-	private static void travel() {
-		
+	void travel(List<Floor> allFl, int capacity) {
+		int moveLimit = 5;
+		while((moveLimit > 0) && (currFloor < allFl.size() + 1)) {
+			requestStop(allFl, capacity);
+			loadUnload(allFl, capacity);
+			if (up == true) {
+				currFloor++;
+				if (currFloor >= allFl.size() + 1) {
+					currFloor = allFl.size();
+					up = false;
+				}
+			} else {
+				currFloor--;
+				if (currFloor <= 0) {
+					currFloor = 1;
+					up = true;
+				}
+			}
+			moveLimit--;
+		}
 	}
 	
-	private static void requestStop() {
+	private void requestStop(List<Floor> allFl, int capacity) {
 		
+		if ((passengersIn.size() == 0) && ((currFloor != 1) && (currFloor != allFl.size()))) {
+			int upCount = 0;
+			int downCount = 0;
+			for (int i = 1; i + currFloor < allFl.size(); i++) {
+				if ((currFloor - 1 + i < allFl.size()) && (allFl.get(currFloor - 1 + i).upCrowd.isEmpty())) {
+					upCount++;
+				} else {
+					break;
+				}
+			}
+			
+			for (int i = 1; currFloor - i < allFl.size(); i++) {
+				if ((currFloor - 1 - i > 0) && (allFl.get(currFloor - 1 - i).downCrowd.isEmpty())) {
+					downCount++;
+				} else {
+					break;
+				}
+			}
+			
+			if (upCount > downCount) {
+				up = false;
+			} else {
+				up = true;
+			}
+		} else if (currFloor == 1) {
+			up = true;
+		} else if (currFloor == allFl.size()){
+			up = false;
+		}
+		
+		if (up == true) {
+			
+			for (Passenger p : allFl.get(currFloor-1).upCrowd) {
+				if (passengersIn.size() >= 10) {
+					break;
+				}
+				passengersIn.add(p);
+				stopUp.add(p.endFloor);
+				allFl.get(currFloor-1).upCrowd.remove(p);
+			}
+			
+			
+		} else {
+
+			for (Passenger p : allFl.get(currFloor-1).downCrowd) {
+				
+				System.out.println(p.endFloor);
+				
+				if (passengersIn.size() >= 10) {
+					break;
+				}
+				
+				passengersIn.add(p);
+				stopDown.add(p.endFloor - (p.endFloor * 2));
+				allFl.get(currFloor-1).upCrowd.remove(p);
+				
+			}
+			
+		}
 	}
 }
